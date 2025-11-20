@@ -44,3 +44,17 @@ public fun to_b36(addr: address): String {
     };
     str.to_string()
 }
+
+public fun is_prefix(prefix: vector<u8>, word: vector<u8>): bool {
+    if (vector::length(&prefix) > vector::length(&word)) {
+        return false
+    };
+    let mut i = 0;
+    while (i < vector::length(&prefix)) {
+        if (prefix[i] != word[i]) {
+            return false
+        };
+        i = i + 1;
+    };
+    true
+}

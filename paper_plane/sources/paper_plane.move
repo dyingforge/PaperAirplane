@@ -1,6 +1,6 @@
 module paper_plane::paper_plane;
 
-use paper_plane::utils::to_b36;
+use paper_plane::utils::{to_b36, is_prefix};
 use seal::bf_hmac_encryption::{
     EncryptedObject,
     decrypt,
@@ -20,8 +20,11 @@ use sui::table::{Self, Table};
 
 
 const EAlreadyPicked: u64 = 0;
+const ENoAccess: u64 = 1;
+const EInvalidAirplane: u64 = 2;
+const EInvalidEncryptedComment: u64 = 3;
 
-const PICK_INTERVAL: u64 = 1000 * 60 * 60 * 1; 
+const PICK_INTERVAL: u64 = 1000 * 60 * 5; 
 
 
 public struct SealConfig has key {
@@ -32,7 +35,6 @@ public struct SealConfig has key {
     threshold: u8,
 }
 
-/*------结构体------*/
 public struct Airplane has key, store {
     id: UID,
     name: String,
@@ -48,6 +50,9 @@ public struct Airplane has key, store {
 public struct Airport has key, store {
     id: UID,
     lasting_picked_time: u64,
+    //airplane address -> picked_by address
+    airplanes_picked: Table<address, address>,
+    //airplane address -> airplane object
     airplanes: vector<Airplane>,
 }
 
@@ -57,7 +62,6 @@ public struct CreatedAirplaneEvent has copy, drop {
     name: String,
     b36addr: String,
 }
-
 
 fun init(ctx: &mut TxContext) {
     let seal_config = SealConfig {
@@ -70,11 +74,12 @@ fun init(ctx: &mut TxContext) {
     let airport = Airport {
         id: object::new(ctx),
         lasting_picked_time: 0,
+        airplanes_picked: table::new(ctx),
         airplanes: vector::empty(),
     };
 
     transfer::share_object(seal_config);
-    transfer::public_share_object(airport);
+    transfer::share_object(airport);
 }
 
 public fun create_airplane(
@@ -95,13 +100,14 @@ public fun create_airplane(
         name,
         owner: sender,
         content_blob: content,
-        picked_by:ctx.sender(),
+        picked_by: sender, 
         picked_time: clock.timestamp_ms(),
         picked_count: 0,
         comments: vector::empty(),
         b36addr: b36addr,
     };
 
+    table::add(&mut airport.airplanes_picked, object_address, sender);
     vector::push_back(&mut airport.airplanes, airplane);
 
     event::emit(CreatedAirplaneEvent {
@@ -114,31 +120,86 @@ public fun create_airplane(
 public fun add_comment(
     airplane: &mut Airplane,
     crypto_comment_data: vector<u8>,
+    seal_config: &SealConfig,
+    ctx: &mut TxContext,
 ) {
+    assert!(airplane.picked_by == ctx.sender(), ENoAccess);
+    
     let crypto_comment = parse_encrypted_object(crypto_comment_data);
+    let airplane_id = object::id(airplane).to_bytes();
+    
+    assert!(*crypto_comment.id() == airplane_id, EInvalidEncryptedComment);
+    assert!(*crypto_comment.services() == seal_config.key_servers, EInvalidEncryptedComment);
+    assert!(crypto_comment.threshold() == seal_config.threshold, EInvalidEncryptedComment);  
+    assert!(*crypto_comment.package_id() == seal_config.package_id, EInvalidEncryptedComment);
+    assert!(crypto_comment.aad().borrow() == ctx.sender().to_bytes(), EInvalidEncryptedComment);
+    
     vector::push_back(&mut airplane.comments, crypto_comment);
 }
 
-// 随机选一个飞机
 public fun pick_plane(
     airport: &mut Airport,
-    random: &Random,
     clock: &Clock,
+    random: &Random,
     ctx: &mut TxContext,
 ) {
+    let airplanes_len = vector::length(&airport.airplanes);
+    assert!(airplanes_len > 0, EInvalidAirplane);
     
+    let current_time = clock.timestamp_ms();
     let mut random_generator = random.new_generator(ctx);
-    let random_number = random_generator.generate_u64_in_range(0, vector::length(&airport.airplanes) - 1);
-    let airplane = vector::borrow_mut(&mut airport.airplanes, random_number);
+    
+    let random_index = random_generator.generate_u64_in_range(0, airplanes_len - 1);
+    
+    let airplane = vector::borrow_mut(&mut airport.airplanes, random_index);
+    let airplane_address = object::uid_to_address(&airplane.id);
+    
+    assert!(current_time >= airplane.picked_time + PICK_INTERVAL, EAlreadyPicked);
+    
     airplane.picked_by = ctx.sender();
+    airplane.picked_time = current_time;
     airplane.picked_count = airplane.picked_count + 1;
+    
+    if (table::contains(&airport.airplanes_picked, airplane_address)) {
+        let picked_by_ref = table::borrow_mut(&mut airport.airplanes_picked, airplane_address);
+        *picked_by_ref = ctx.sender();
+    } else {
+        table::add(&mut airport.airplanes_picked, airplane_address, ctx.sender());
+    };
 }
 
-//捡起人可以拿，或者到时间，自动返回owner
-entry fun seal_airplane(
-    airport: &mut Airport,
-    ctx: &mut TxContext,
-) {
-    let (is_picked, index) = vector::index_of(&airport.airplanes, &ctx.sender());
+public fun namespace(airplane: &Airplane): vector<u8> {
+    object::id(airplane).to_bytes()
+}
 
+public fun approve_internal(
+    caller: address,
+    airplane: &Airplane,
+    id: vector<u8>,
+    clock: &Clock,
+): bool {
+    let namespace = namespace(airplane);
+    if (!is_prefix(namespace, id)) {
+        return false
+    };
+    
+    let current_time = clock.timestamp_ms();
+    let end_time = airplane.picked_time + PICK_INTERVAL;
+    
+    if (airplane.picked_by == caller) {
+        return true
+    } else if (current_time >= end_time && airplane.owner == caller) {
+        return true
+    } else {
+        return false
+    }
+}
+
+entry fun seal_approve(
+    id: vector<u8>,
+    airplane: &Airplane,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    assert!(approve_internal(ctx.sender(), airplane, id, clock), ENoAccess);
 }
