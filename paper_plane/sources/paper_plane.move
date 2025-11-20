@@ -19,6 +19,10 @@ use sui::sui::SUI;
 use sui::table::{Self, Table};
 
 
+const EAlreadyPicked: u64 = 0;
+
+const PICK_INTERVAL: u64 = 1000 * 60 * 60 * 1; 
+
 
 public struct SealConfig has key {
     id: UID,
@@ -29,19 +33,22 @@ public struct SealConfig has key {
 }
 
 /*------结构体------*/
-public struct Airplane has key {
+public struct Airplane has key, store {
     id: UID,
     name: String,
     owner: address,
     content_blob: String,
     picked_by: address,
+    picked_time: u64,
+    picked_count: u64,
     comments: vector<EncryptedObject>,
     b36addr: String,
 }
 
 public struct Airport has key, store {
     id: UID,
-    airplanes: vector<address>,
+    lasting_picked_time: u64,
+    airplanes: vector<Airplane>,
 }
 
 /*-----事件------*/
@@ -62,6 +69,7 @@ fun init(ctx: &mut TxContext) {
     };
     let airport = Airport {
         id: object::new(ctx),
+        lasting_picked_time: 0,
         airplanes: vector::empty(),
     };
 
@@ -73,6 +81,7 @@ public fun create_airplane(
     airport: &mut Airport,
     name: String,
     content: String,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     let sender = ctx.sender();
@@ -87,13 +96,13 @@ public fun create_airplane(
         owner: sender,
         content_blob: content,
         picked_by:ctx.sender(),
+        picked_time: clock.timestamp_ms(),
+        picked_count: 0,
         comments: vector::empty(),
         b36addr: b36addr,
     };
 
-    vector::push_back(&mut airport.airplanes, object_address);
-
-    transfer::share_object(airplane);
+    vector::push_back(&mut airport.airplanes, airplane);
 
     event::emit(CreatedAirplaneEvent {
         event_id,
@@ -114,21 +123,22 @@ public fun add_comment(
 public fun pick_plane(
     airport: &mut Airport,
     random: &Random,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    let sender = ctx.sender();
-    let id = object::new(ctx);
-    let object_address = vector::remove(&mut airport.airplanes, random.next_u64() % vector::length(&airport.airplanes));
-    transfer::public_share_object(object_address);
+    
+    let mut random_generator = random.new_generator(ctx);
+    let random_number = random_generator.generate_u64_in_range(0, vector::length(&airport.airplanes) - 1);
+    let airplane = vector::borrow_mut(&mut airport.airplanes, random_number);
+    airplane.picked_by = ctx.sender();
+    airplane.picked_count = airplane.picked_count + 1;
 }
 
 //捡起人可以拿，或者到时间，自动返回owner
 entry fun seal_airplane(
-    airplane: &mut Airplane,
+    airport: &mut Airport,
     ctx: &mut TxContext,
 ) {
-    let sender = ctx.sender();
-    let id = object::new(ctx);
-    let object_address = object::uid_to_address(&id);
-    let b36addr = to_b36(object_address);
+    let (is_picked, index) = vector::index_of(&airport.airplanes, &ctx.sender());
+
 }
