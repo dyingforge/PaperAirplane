@@ -130,7 +130,7 @@ public fun add_comment(
     
     assert!(*crypto_comment.id() == airplane_id, EInvalidEncryptedComment);
     assert!(*crypto_comment.services() == seal_config.key_servers, EInvalidEncryptedComment);
-    assert!(crypto_comment.threshold() == seal_config.threshold, EInvalidEncryptedComment);  
+    assert!(crypto_comment.threshold() == seal_config.threshold, EInvalidEncryptedComment);
     assert!(*crypto_comment.package_id() == seal_config.package_id, EInvalidEncryptedComment);
     assert!(crypto_comment.aad().borrow() == ctx.sender().to_bytes(), EInvalidEncryptedComment);
     
@@ -173,10 +173,10 @@ public fun namespace(airplane: &Airplane): vector<u8> {
 }
 
 public fun approve_internal(
-    caller: address,
     airplane: &Airplane,
     id: vector<u8>,
     clock: &Clock,
+    ctx: &mut TxContext,
 ): bool {
     let namespace = namespace(airplane);
     if (!is_prefix(namespace, id)) {
@@ -186,9 +186,9 @@ public fun approve_internal(
     let current_time = clock.timestamp_ms();
     let end_time = airplane.picked_time + PICK_INTERVAL;
     
-    if (airplane.picked_by == caller) {
+    if (airplane.picked_by == ctx.sender()) {
         return true
-    } else if (current_time >= end_time && airplane.owner == caller) {
+    } else if (current_time >= end_time && airplane.owner == ctx.sender()) {
         return true
     } else {
         return false
@@ -199,7 +199,7 @@ entry fun seal_approve(
     id: vector<u8>,
     airplane: &Airplane,
     clock: &Clock,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
-    assert!(approve_internal(ctx.sender(), airplane, id, clock), ENoAccess);
+    assert!(approve_internal(airplane, id, clock, ctx), ENoAccess);
 }
