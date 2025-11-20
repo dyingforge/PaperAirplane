@@ -110,16 +110,19 @@ public fun add_comment(
     vector::push_back(&mut airplane.comments, crypto_comment);
 }
 
+// 随机选一个飞机
 public fun pick_plane(
     airport: &mut Airport,
-    random_number: u64,
+    random: &Random,
     ctx: &mut TxContext,
 ) {
     let sender = ctx.sender();
     let id = object::new(ctx);
-    let object_address = vector::pop_back(&mut airport.airplanes);
+    let object_address = vector::remove(&mut airport.airplanes, random.next_u64() % vector::length(&airport.airplanes));
+    transfer::public_share_object(object_address);
 }
 
+//捡起人可以拿，或者到时间，自动返回owner
 entry fun seal_airplane(
     airplane: &mut Airplane,
     ctx: &mut TxContext,
