@@ -27,7 +27,7 @@ export async function createWalrusFile(content: string, address: string) {
     deletable: true,
   });
   const { digest } = await signAndExecuteTransaction({
-    transaction: registerTx,
+    transaction: registerTx as any,
   });
   // Step 3: Upload the data to storage nodes
   // This can be done immediately after the register step, or as a separate step the user initiates
@@ -37,7 +37,7 @@ export async function createWalrusFile(content: string, address: string) {
 
   const certifyTx = flow.certify();
 
-  await signAndExecuteTransaction({ transaction: certifyTx });
+  await signAndExecuteTransaction({ transaction: certifyTx as any });
 
   // Step 5: Get the new files
   const files = await flow.listFiles();
