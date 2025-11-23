@@ -9,9 +9,8 @@ const configs = {
         Package: process.env.DEVNET_PACKAGE_ID!,
     },
     testnet: {
-        Package: "0xb1028b5ef41d5caf6e60605958183d6d02374d811c367e0d9a584879ba235db0",
-        Airport:"0x4bffad764b5a4429fea9dc9112dc01b2b979c92060ab9e2c92629af66211396e",
-        SealConfig:"0x17e4eb7f4b332e472eaa257bdb4abf9d3665c78b91aa43497a92bfdfeda59a8b",
+        Package: "0x339eab7569d5d58560fb666e0f23198d4efffe8aae5973d41b68e14db64b7cbb",
+        Airport:"0x5d34528456fbb30a4370d923e2fc0bebe0715097a888182708b4eaf17dc758f9",
     },
     mainnet: {
         Package: process.env.MAINNET_PACKAGE_ID!,

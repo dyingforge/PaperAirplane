@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -7,23 +8,46 @@ import {
   Archive, 
   Radio,
   Paperclip,
-  X
+  X,
+  Loader2
 } from "lucide-react";
 import { NavButton } from "@/components/NavButton";
 import { BrutalistButton } from "@/components/BrutalistButton";
 import { HuntInterface } from "@/components/HuntInterface";
 import { HangarList } from "@/components/HangarList";
 import { Navbar } from "@/components/Navbar";
+import { getPickedAirplaneByHash } from "@/contracts/query";
+
+// Hooks & Utils
+import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
+import { useSecretStorage } from "@/hooks/useSecretStorage";
+import { createAirplane } from "@/contracts/call";
+import { networkConfig } from "@/contracts/index";
 
 export default function WireframePaperPlane() {
   // 状态: 'throw' | 'hunt' | 'hangar'
   const [mode, setMode] = useState("throw");
-  const [wallet, setWallet] = useState(false);
+  // const [wallet, setWallet] = useState(false); // Managed by dApp Kit
 
   // Throw mode states
   const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isLaunching, setIsLaunching] = useState(false);
+
+  const currentAccount = useCurrentAccount();
+  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+  const { encryptAndUpload } = useSecretStorage();
+
+  useEffect(() => {
+    const fetchPickedAirplane = async () => {
+      const pickedAirplane = await getPickedAirplaneByHash("BNhuNVEA72hpbKBzHCmWXGgzhDC17cM4hXJSfuGkNJ62");
+        if (pickedAirplane) {
+          setMode("hunt");
+        }
+    };
+    fetchPickedAirplane();
+  }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
@@ -39,10 +63,64 @@ export default function WireframePaperPlane() {
     setPreviewUrl(null);
   };
 
+  const handleLaunch = async () => {
+    if (!currentAccount) {
+      alert("Please connect wallet first!");
+      return;
+    }
+    if (!content.trim() && !file) {
+      alert("Please add some content or an image!");
+      return;
+    }
+
+    setIsLaunching(true);
+    try {
+      // 1. Encrypt & Upload to Walrus
+      const blobId = await encryptAndUpload(
+        { 
+          text: content, 
+          timestamp: Date.now() 
+        }, 
+        file || undefined
+      );
+
+      // 2. Build Transaction
+      // Hardcoded Airport ID for now - should come from config
+      const airportId = networkConfig.testnet.variables.Airport; 
+      const tx = await createAirplane(airportId, "Paper Plane", blobId);
+
+      // 3. Execute Transaction
+      signAndExecute(
+        { transaction: tx as any },
+        {
+          onSuccess: (result) => {
+            console.log("Launched successfully:", result);
+            alert("Paper Plane Launched into the Void!");
+            // Reset form
+            setContent("");
+            clearFile();
+            setIsLaunching(false);
+            setMode("hunt"); // Switch to hunt mode
+          },
+          onError: (err) => {
+            console.error("Launch failed:", err);
+            alert("Launch failed. See console.");
+            setIsLaunching(false);
+          }
+        }
+      );
+
+    } catch (e) {
+      console.error("Process failed:", e);
+      alert("Failed to encrypt or upload.");
+      setIsLaunching(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-black font-mono selection:bg-black selection:text-white flex items-center justify-center p-4 pt-24">
       
-      <Navbar wallet={wallet} setWallet={setWallet} />
+      <Navbar />
 
       {/* 装饰背景线 */}
       <div className="fixed inset-0 opacity-5 pointer-events-none" 
@@ -95,6 +173,7 @@ export default function WireframePaperPlane() {
                     placeholder="Type your message here. It will be sealed and thrown into the decentralized ocean..."
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
+                    disabled={isLaunching}
                   />
                 </div>
 
@@ -115,6 +194,7 @@ export default function WireframePaperPlane() {
                       <button 
                         onClick={clearFile}
                         className="absolute top-2 right-2 bg-white border border-black p-1 hover:bg-black hover:text-white transition-colors shadow-sm"
+                        disabled={isLaunching}
                       >
                         <X size={14} />
                       </button>
@@ -129,6 +209,7 @@ export default function WireframePaperPlane() {
                         accept="image/*" 
                         onChange={handleFileSelect}
                         className="absolute inset-0 opacity-0 cursor-pointer z-20"
+                        disabled={isLaunching}
                       />
                       <div className="flex flex-col items-center gap-2 text-gray-400 pointer-events-none">
                         <Paperclip size={24} strokeWidth={1.5} />
@@ -147,8 +228,12 @@ export default function WireframePaperPlane() {
                     </p>
                     <p>STORAGE: WALRUS_BLOB</p>
                   </div>
-                  <BrutalistButton icon={<Send size={18} />}>
-                    LAUNCH PLANE
+                  <BrutalistButton 
+                    icon={isLaunching ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} />}
+                    onClick={handleLaunch}
+                    disabled={isLaunching}
+                  >
+                    {isLaunching ? "SEALING..." : "LAUNCH PLANE"}
                   </BrutalistButton>
                 </div>
               </motion.div>

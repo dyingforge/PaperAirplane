@@ -1,3 +1,5 @@
+import { WALRUS_PUBLISHER } from './client';
+
 interface UploadResponse {
     newlyCreated?: {
         blobObject?: {
@@ -15,8 +17,11 @@ interface UploadResponse {
  * @param epochs - 存储周期 (默认 2)
  */
 export async function uploadBlob(file: File | Blob, epochs: number = 2): Promise<string> {
-    const url = `${import.meta.env.VITE_PUBLISHER}/v1/blobs?epochs=${epochs}`;
+    // 使用 client.ts 中导出的常量，包含了回退逻辑
+    const url = `${WALRUS_PUBLISHER}/v1/blobs?epochs=${epochs}`;
     
+    console.log("Uploading to Walrus:", url);
+
     const response = await fetch(url, {
         method: 'PUT',
         body: file, 

@@ -1,6 +1,6 @@
 // 优先使用环境变量中的配置，如果失败则回退到列表中的其他节点
-const ENV_PUBLISHER = import.meta.env.VITE_PUBLISHER;
-const ENV_AGGREGATOR = import.meta.env.VITE_AGGREGATOR;
+const ENV_PUBLISHER = process.env.NEXT_PUBLIC_WALRUS_PUBLISHER;
+const ENV_AGGREGATOR = process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR;
 
 export const PUBLISHERS = [
     ENV_PUBLISHER,

@@ -81,7 +81,7 @@ export async function encryptAirplaneContent(fileOrData: File) {
 
 export async function decryptAirplaneContent(
     encryptedData: Uint8Array,
-    airplaneId: string,
+    airplaneAddress: string, // 共享对象的地址
     currentAddress: string,
     signMessage: (args: { message: Uint8Array }) => Promise<{ signature: string }>
 ): Promise<Uint8Array> { 
@@ -91,10 +91,11 @@ export async function decryptAirplaneContent(
 
     const tx = new Transaction();
     tx.moveCall({
-        target: `${networkConfig.testnet.variables.Package}::paper_airplane::seal_approve`,
+        target: `${networkConfig.testnet.variables.Package}::paper_plane::seal_approve`,
         arguments: [
+            tx.object(networkConfig.testnet.variables.Airport),
             tx.pure.vector('u8', fromHex(networkConfig.testnet.variables.Package)),
-            tx.object(airplaneId),
+            tx.object(airplaneAddress), // 共享对象
             tx.object.clock(),
         ],
     });

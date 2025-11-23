@@ -2,6 +2,11 @@ import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Lock, Unlock, Loader2, Radar, Hand, Send } from "lucide-react";
 import { DecryptedContent } from "./DecryptedContent";
+import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
+import { pickPlane, addComment } from "@/contracts/call";
+import { networkConfig } from "@/contracts/index";
+import { getAirplaneInfo, getPickedAirplaneByHash } from "@/contracts/query";
+import { useSecretStorage } from "@/hooks/useSecretStorage";
 
 type HuntStatus = "SCANNING" | "DETECTED" | "CAPTURED" | "DECRYPTED";
 
@@ -10,52 +15,146 @@ export const HuntInterface = () => {
   const [loading, setLoading] = useState(false);
   const [decryptedData, setDecryptedData] = useState<{text: string, imageUrl?: string} | null>(null);
   const [comment, setComment] = useState("");
+  const [currentAirplane, setCurrentAirplane] = useState<{id: string, blobId: string} | null>(null);
+
+  const currentAccount = useCurrentAccount();
+  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+  const { downloadAndDecrypt, encryptAndUpload } = useSecretStorage();
 
   // 1. 模拟扫描过程 -> 发现信号
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (status === "SCANNING") {
-      timer = setTimeout(() => setStatus("DETECTED"), 2500);
+      // 模拟随机扫描时间 2-5秒
+      const delay = Math.floor(Math.random() * 3000) + 2000;
+      timer = setTimeout(() => setStatus("DETECTED"), delay);
     }
     return () => clearTimeout(timer);
   }, [status]);
 
   // 2. 处理捕捉 (Pick Plane)
-  const handleCatch = () => {
+  const handleCatch = async () => {
+    if (!currentAccount) {
+      alert("Connect wallet first");
+      return;
+    }
     setLoading(true);
-    // TODO: 这里未来调用合约 pick_plane()
-    setTimeout(() => {
+
+    try {
+      const airportId = networkConfig.testnet.variables.Airport;
+      // 为了演示，这里简化参数 (clock, random 需要是对象 ID 0x6, 0x8)
+      const tx = await pickPlane(airportId, "0x6", "0x8");
+
+      signAndExecute(
+        { transaction: tx as any },
+        {
+          onSuccess: async (result) => {
+            console.log("Pick success, Digest:", result.digest);
+            
+            try {
+                // 使用 waitForTransaction 等待交易完成并获取事件
+                const airplaneId = await getPickedAirplaneByHash(result.digest);
+                
+                if (airplaneId) {
+                    console.log("Caught Airplane ID:", airplaneId);
+                    
+                    // 获取 Blob ID - 注意：airplaneId 是 ID，但 getAirplaneInfo 需要 address
+                    // 在 Sui 中，ID 和 address 通常是相同的格式，可以直接使用
+                    const info = await getAirplaneInfo(airplaneId);
+                    if (info && info.contentBlob) {
+                        setCurrentAirplane({ id: airplaneId, blobId: info.contentBlob });
+                        setStatus("CAPTURED");
+                    } else {
+                        console.warn("Failed to fetch airplane info");
+                        alert("Caught plane but failed to fetch details.");
+                        setStatus("SCANNING");
+                    }
+                } else {
+                    console.warn("No PickedAirplaneEvent found in transaction");
+                    alert("Picked successfully but could not verify ID. Check Hangar.");
+                    setStatus("SCANNING");
+                }
+            } catch (e) {
+                console.error("Failed to fetch info:", e);
+                alert("Caught plane but failed to fetch details.");
+                setStatus("SCANNING");
+            }
+            setLoading(false);
+          },
+          onError: (err) => {
+            console.error("Pick failed:", err);
+            setLoading(false);
+            // 如果是因为冷却时间或没有飞机
+            alert("Failed to catch plane. Maybe try again later?");
+            setStatus("SCANNING");
+          }
+        }
+      );
+    } catch (e) {
+      console.error(e);
       setLoading(false);
-      setStatus("CAPTURED");
-    }, 1500);
+    }
   };
 
   // 3. 处理解密 (Decrypt)
-  const handleDecrypt = () => {
+  const handleDecrypt = async () => {
+    if (!currentAirplane) return;
     setLoading(true);
-    // TODO: 这里未来调用 Seal 解密
-    setTimeout(() => {
-      setDecryptedData({
-        text: "I found this secret message in the depths of the ocean. It's beautiful here.",
-        imageUrl: "https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?w=800&q=80"
-      });
-      setLoading(false);
-      setStatus("DECRYPTED");
-    }, 1500);
+    
+    try {
+        const content = await downloadAndDecrypt(currentAirplane.blobId, currentAirplane.id);
+        setDecryptedData({
+            text: content.text,
+            imageUrl: content.mediaUrl ? `data:${content.mimeType || 'image/png'};base64,${content.mediaUrl}` : undefined
+        });
+        setStatus("DECRYPTED");
+    } catch (e) {
+        console.error("Decrypt failed:", e);
+        alert("Decryption failed. You might not have access yet.");
+    } finally {
+        setLoading(false);
+    }
   };
 
   // 4. 处理评论并扔回
-  const handleThrowBack = () => {
+  const handleThrowBack = async () => {
+    if (!currentAirplane || !comment.trim()) return;
     setLoading(true);
-    // TODO: 调用 add_comment 合约
-    console.log("Adding comment:", comment);
     
-    setTimeout(() => {
-      setLoading(false);
-      setComment("");
-      setDecryptedData(null);
-      setStatus("SCANNING"); // 重置流程
-    }, 1500);
+    try {
+        // 1. 先加密评论并上传到 Walrus
+        const commentContent = {
+            text: comment,
+            timestamp: Date.now()
+        };
+        const commentBlobId = await encryptAndUpload(commentContent);
+        console.log("Comment encrypted and uploaded. Blob ID:", commentBlobId);
+        
+        // 2. 使用 blobId 调用合约
+        const airportId = networkConfig.testnet.variables.Airport;
+        const tx = await addComment(airportId, currentAirplane.id, commentBlobId);
+        signAndExecute(
+            { transaction: tx as any },
+            {
+                onSuccess: () => {
+                    alert("Comment added! Plane released.");
+                    setComment("");
+                    setDecryptedData(null);
+                    setCurrentAirplane(null);
+                    setStatus("SCANNING");
+                },
+                onError: (err) => {
+                    console.error(err);
+                    alert("Failed to add comment.");
+                }
+            }
+        )
+    } catch (e) {
+        console.error(e);
+        alert("Error encrypting comment or preparing transaction");
+    } finally {
+        setLoading(false);
+    }
   };
 
   // --- 渲染不同状态 ---
@@ -98,7 +197,7 @@ export const HuntInterface = () => {
           <div className="text-xs font-mono text-left bg-gray-100 p-4 border border-black space-y-2">
             <p>PROXIMITY: <span className="font-bold">NEAR</span></p>
             <p>TYPE: <span className="font-bold">UNKNOWN_PAYLOAD</span></p>
-            <p>EST_SIZE: <span className="font-bold">24KB</span></p>
+            <p>EST_SIZE: <span className="font-bold">--</span></p>
           </div>
 
           <button 
@@ -128,7 +227,9 @@ export const HuntInterface = () => {
             {status === "DECRYPTED" ? <Unlock size={14} className="text-green-600"/> : <Lock size={14}/>} 
             {status === "DECRYPTED" ? "DECRYPTED_PAYLOAD" : "ENCRYPTED_BLOB"}
           </span>
-          <span className="text-xs font-mono">ID: #8F3A</span>
+          <span className="text-xs font-mono">
+            ID: {currentAirplane ? `#${currentAirplane.id.slice(0,6)}...` : 'UNKNOWN'}
+          </span>
         </div>
 
         {/* Content Area */}
