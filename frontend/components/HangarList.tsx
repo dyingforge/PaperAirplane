@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ArrowRight, CornerDownRight, Wind, Paperclip, Clock, Lock, RefreshCw, Send, Loader2 } from "lucide-react";
+import { ArrowRight, CornerDownRight, Paperclip, Clock, Lock, RefreshCw, Send, Loader2 } from "lucide-react";
 import { DecryptedContent } from "./DecryptedContent";
 import { useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
 import { getPickedAirplanes, getUserAirplanes, getAirplaneInfo } from "@/contracts/query";
@@ -29,7 +29,6 @@ export const HangarList = () => {
   const [ownedPlanes, setOwnedPlanes] = useState<PlaneItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"picked" | "owned">("picked");
-  const { downloadAndDecrypt } = useSecretStorage();
 
   // 加载数据
   const loadPlanes = async () => {
@@ -168,7 +167,7 @@ export const HangarList = () => {
 };
 
 // 单独抽离组件以处理倒计时逻辑和解密
-const PlaneRow = ({ item, isPicked, onCommentAdded }: { item: PlaneItem; isPicked: boolean; onCommentAdded?: () => void }) => {
+const PlaneRow = ({ item, isPicked }: { item: PlaneItem; isPicked: boolean; onCommentAdded?: () => void }) => {
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [decryptedData, setDecryptedData] = useState<{text: string, imageUrl?: string} | null>(null);
   const [decryptedComments, setDecryptedComments] = useState<DecryptedComment[]>([]);
